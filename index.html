@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AquaTrace — Coastal Water Quality Monitoring Dashboard</title>
+
+  <!-- SEO Meta Tags -->
+  <meta name="description"
+    content="AquaTrace real-time coastal water quality monitoring dashboard. Powered by Arduino Uno, pH, TDS, Turbidity, and DS18B20 Temperature sensors.">
+  <meta name="keywords"
+    content="AquaTrace, Water Quality Monitoring, IoT, Arduino Uno, Sensor Fusion, Anomaly Detection">
+
+  <!-- Style sheets -->
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Chart.js Annotations Plugin for pH safe limits highlight -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+</head>
+
+<body>
+
+  <!-- Toast alert notifications popup container -->
+  <div id="toast-container"></div>
+
+  <div class="dashboard-grid">
+
+    <!-- 1. Header Panel -->
+    <header class="glass-panel" id="main-header">
+      <div class="header-info">
+        <h1>🌊 AquaTrace — Coastal Water Quality <span id="data-mode-badge"
+            style="font-size:0.75rem; padding:0.2rem 0.5rem; background:rgba(14,165,233,0.15); border:1px solid var(--color-blue); border-radius:4px; font-weight:600; color:var(--color-blue); vertical-align:middle; text-transform:uppercase">Sample
+            Mode</span></h1>
+        <p>Real-time coastal water quality monitoring platform powered by multi-sensor telemetry, intelligent anomaly
+          detection, and sensor health analysis.</p>
+      </div>
+      <div class="header-controls">
+        <div class="live-status" id="live-indicator">
+          ⏹ Offline
+        </div>
+        <div class="sim-speed-control">
+          <label for="sim-speed">Interval:</label>
+          <input type="range" id="sim-speed" min="500" max="5000" step="500" value="2000">
+          <span id="sim-speed-val">2.0s</span>
+        </div>
+        <button class="btn btn-primary" id="btn-toggle-mode">⚡ Switch to Live Arduino</button>
+        <button class="btn" id="btn-play">▶ Play Sample Stream</button>
+        <button class="btn" id="btn-reset-data">🔄 Reset Data</button>
+        <button class="btn" id="btn-export-csv">📥 Download CSV</button>
+        <button class="btn btn-outline-danger" id="btn-export-pdf">🖨 Export PDF Report</button>
+      </div>
+    </header>
+
+    <!-- 2. KPI Section -->
+    <section class="kpi-container">
+
+      <!-- Primary KPI: Water Quality Monitoring Status (Replaces Current Pollution Index) -->
+      <div class="glass-panel kpi-card" id="kpi-pollution-card">
+        <div class="kpi-header">
+          <span class="kpi-title">Water Quality Status</span>
+          <span class="kpi-icon">💧</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-pollution-value">Optimal</span>
+          <span class="kpi-delta" id="kpi-pollution-delta">Evaluating...</span>
+        </div>
+        <div class="sparkline-box">
+          <canvas id="pollution-sparkline" width="220" height="35"></canvas>
+        </div>
+      </div>
+
+      <!-- KPI: pH Level -->
+      <div class="glass-panel kpi-card" id="kpi-ph-card">
+        <div class="kpi-header">
+          <span class="kpi-title">Latest pH Level</span>
+          <span class="kpi-icon">🧪</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-ph-val">0.0</span>
+          <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:0.5rem">Safe: 6.5 - 8.5</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.75rem">Coastal baseline equilibrium index
+        </div>
+      </div>
+
+      <!-- KPI: Turbidity -->
+      <div class="glass-panel kpi-card" id="kpi-turbidity-card">
+        <div class="kpi-header">
+          <span class="kpi-title">Latest Turbidity</span>
+          <span class="kpi-icon">🌫️</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-turbidity-val">0.0 NTU</span>
+          <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:0.5rem">Limit: &lt; 50 NTU</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.75rem">Suspended clarity & particulate
+          density</div>
+      </div>
+
+      <!-- KPI: Latest TDS (Replaces Oil Index) -->
+      <div class="glass-panel kpi-card" id="kpi-tds-card">
+        <div class="kpi-header">
+          <span class="kpi-title">Latest TDS</span>
+          <span class="kpi-icon">🧂</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-tds-val">0 PPM</span>
+          <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:0.5rem">Nominal: &lt; 500 PPM</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.75rem">Total Dissolved Solids concentration
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 3. Active Filters -->
+    <section class="glass-panel filters-panel">
+      <div class="filter-group">
+        <label for="device-filter">Data Source Mode:</label>
+        <select class="filter-select" id="device-filter">
+          <option value="all">All Readings (Live & Stored)</option>
+          <option value="sample_mode">Sample Experimental Readings</option>
+          <option value="live_hardware">Arduino Live Hardware Telemetry</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="source-filter">Anomaly Status Filter:</label>
+        <select class="filter-select" id="source-filter">
+          <option value="all">All Conditions</option>
+          <option value="normal">Normal Baseline</option>
+          <option value="single_anomaly">Single Parameter Breach</option>
+          <option value="multi_anomaly">Multi-Sensor Correlated Anomaly</option>
+          <option value="sensor_issue">Sensor Verification Required</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="time-range-filter">Timeframe History:</label>
+        <select class="filter-select" id="time-range-filter">
+          <option value="all">Full Stored History</option>
+          <option value="24h">Last 24 Hours</option>
+          <option value="7d">Last 7 Days (Weekly)</option>
+          <option value="30d">Last 30 Days (Monthly)</option>
+        </select>
+      </div>
+
+      <div style="margin-left: auto; font-size: 0.8rem; color: var(--text-secondary)">
+        Last Measurement: <strong id="last-update-ts" style="color:var(--text-primary)">-</strong>
+      </div>
+    </section>
+
+    <!-- 4. Column Layout: Left Column (Hardware & Sensor Status) -->
+    <main class="col-left">
+
+      <!-- Hardware and Sensor Monitoring (Replaces Telemetry Station Mapping) -->
+      <div class="glass-panel map-panel">
+        <div class="map-title-row">
+          <h3>🔌 Hardware and Device Monitoring</h3>
+          <span style="font-size:0.75rem; color:var(--text-secondary)" id="hw-mode-status">Arduino Uno • 20x4 I2C LCD
+            System</span>
+        </div>
+
+        <div class="hw-dashboard-box" style="display:flex; flex-direction:column; gap:1rem; padding:0.5rem 0">
+          <div class="hw-status-grid"
+            style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:1rem">
+            <div class="hw-card"
+              style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); padding:0.85rem; border-radius:10px">
+              <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600">
+                Microcontroller Status</div>
+              <div
+                style="font-family:var(--font-display); font-size:1.15rem; font-weight:700; margin-top:0.25rem; color:var(--color-blue)"
+                id="hw-conn-status">Disconnected (Sample Mode)</div>
+              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem">Port: <span
+                  id="hw-port-name">WebSerial API Ready</span></div>
+            </div>
+
+            <div class="hw-card"
+              style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); padding:0.85rem; border-radius:10px">
+              <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600">LCD
+                20x4 Display</div>
+              <div
+                style="font-family:var(--font-display); font-size:1.15rem; font-weight:700; margin-top:0.25rem; color:var(--color-good)"
+                id="hw-lcd-status">Active (I2C 0x27)</div>
+              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem">Lines 1-4 Telemetry Sync OK
+              </div>
+            </div>
+
+            <div class="hw-card"
+              style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); padding:0.85rem; border-radius:10px">
+              <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600">
+                Packets / Uptime</div>
+              <div
+                style="font-family:var(--font-display); font-size:1.15rem; font-weight:700; margin-top:0.25rem; color:var(--text-primary)"
+                id="hw-packet-count">0 Packets</div>
+              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem">Uptime: <span
+                  id="hw-uptime-val">00:00:00</span></div>
+            </div>
+
+            <div class="hw-card"
+              style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); padding:0.85rem; border-radius:10px">
+              <div style="font-size:0.75rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600">
+                Transmission Errors</div>
+              <div
+                style="font-family:var(--font-display); font-size:1.15rem; font-weight:700; margin-top:0.25rem; color:var(--color-good)"
+                id="hw-error-count">0 Errors</div>
+              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.25rem">CRC Check: Pass</div>
+            </div>
+          </div>
+
+          <!-- WebSerial / Hardware Connection Panel -->
+          <div
+            style="display:flex; justify-content:space-between; align-items:center; background:rgba(14,165,233,0.05); border:1px solid rgba(14,165,233,0.2); padding:0.85rem 1rem; border-radius:10px; flex-wrap:wrap; gap:0.5rem">
+            <div>
+              <strong style="font-size:0.875rem; color:var(--text-primary)">Arduino Serial Connection (USB /
+                COM)</strong>
+              <div style="font-size:0.75rem; color:var(--text-secondary)">Connect your physical Arduino Uno running
+                AquaTrace firmware via WebSerial in Chrome/Edge.</div>
+            </div>
+            <button class="btn btn-primary" id="btn-connect-serial" style="font-size:0.8rem">🔌 Connect Serial
+              Port</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sensor Status Overview (Replaces Daily Temporal Heatmap) -->
+      <div class="glass-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem">
+          <h3 style="font-family:var(--font-display); font-size:1.125rem; font-weight:600">📡 Sensor Health &
+            Calibration Overview</h3>
+          <span style="font-size:0.75rem; color:var(--text-secondary)">Real-time verification flags</span>
+        </div>
+
+        <div class="sensor-health-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:0.85rem"
+          id="sensor-health-grid">
+
+          <!-- pH Sensor Card -->
+          <div class="sensor-health-card"
+            style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); border-radius:10px; padding:0.85rem"
+            id="sh-card-ph">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <strong style="font-size:0.9rem">pH Probe Sensor</strong>
+              <span class="live-status" style="font-size:0.65rem; padding:0.15rem 0.4rem" id="sh-status-ph">Calibration
+                Required</span>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.4rem">Reading Validity: <span
+                style="color:var(--text-primary)" id="sh-val-ph">15.13 (Out of bounds)</span></div>
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem">Last Sync: <span
+                id="sh-time-ph">-</span></div>
+          </div>
+
+          <!-- TDS Sensor Card -->
+          <div class="sensor-health-card"
+            style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); border-radius:10px; padding:0.85rem"
+            id="sh-card-tds">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <strong style="font-size:0.9rem">TDS Meter Sensor</strong>
+              <span class="live-status"
+                style="font-size:0.65rem; padding:0.15rem 0.4rem; background:rgba(16,185,129,0.15); color:var(--color-good)"
+                id="sh-status-tds">Connected</span>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.4rem">Reading Validity: <span
+                style="color:var(--text-primary)" id="sh-val-tds">0 PPM (Normal)</span></div>
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem">Last Sync: <span
+                id="sh-time-tds">-</span></div>
+          </div>
+
+          <!-- Turbidity Sensor Card -->
+          <div class="sensor-health-card"
+            style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); border-radius:10px; padding:0.85rem"
+            id="sh-card-turbidity">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <strong style="font-size:0.9rem">Turbidity Sensor</strong>
+              <span class="live-status"
+                style="font-size:0.65rem; padding:0.15rem 0.4rem; background:rgba(245,158,11,0.15); color:var(--color-warning)"
+                id="sh-status-turbidity">Verification Required</span>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.4rem">Reading Validity: <span
+                style="color:var(--text-primary)" id="sh-val-turbidity">2377 NTU (Elevated)</span></div>
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem">Last Sync: <span
+                id="sh-time-turbidity">-</span></div>
+          </div>
+
+          <!-- Temperature Sensor Card -->
+          <div class="sensor-health-card"
+            style="background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); border-radius:10px; padding:0.85rem"
+            id="sh-card-temp">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <strong style="font-size:0.9rem">DS18B20 Temp Probe</strong>
+              <span class="live-status"
+                style="font-size:0.65rem; padding:0.15rem 0.4rem; background:rgba(16,185,129,0.15); color:var(--color-good)"
+                id="sh-status-temp">Connected</span>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.4rem">Reading Validity: <span
+                style="color:var(--text-primary)" id="sh-val-temp">31.4 °C (Valid)</span></div>
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem">Last Sync: <span
+                id="sh-time-temp">-</span></div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+
+    <!-- 5. Column Layout: Right Column (Telemetry Charts & Alert Logs) -->
+    <aside class="col-right">
+
+      <!-- Telemetry Charts (Retained & Connected to Actual Stored Data) -->
+      <div class="glass-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
+          <h3 style="font-family:var(--font-display); font-size:1.125rem; font-weight:600">📈 Parameters Time Series
+            Analysis</h3>
+          <div style="display:flex; gap:0.5rem">
+            <button class="btn btn-outline" id="btn-toggle-prediction"
+              style="padding:0.2rem 0.5rem; font-size:0.7rem">🔮 Show ML Prediction</button>
+          </div>
+        </div>
+
+        <div class="charts-container">
+
+          <div class="chart-box">
+            <div class="chart-box-header">
+              <h4>pH Level Dynamics</h4>
+              <span style="font-size:0.7rem; color:var(--text-secondary)">Safe Range: 6.5 - 8.5</span>
+            </div>
+            <div style="height:120px"><canvas id="chart-ph"></canvas></div>
+          </div>
+
+          <div class="chart-box">
+            <div class="chart-box-header">
+              <h4>Turbidity Index (NTU)</h4>
+              <span style="font-size:0.7rem; color:var(--text-secondary)">Standard: &lt; 50 NTU</span>
+            </div>
+            <div style="height:120px"><canvas id="chart-turbidity"></canvas></div>
+          </div>
+
+          <div class="chart-box">
+            <div class="chart-box-header">
+              <h4>Total Dissolved Solids (mg/L / PPM)</h4>
+              <span style="font-size:0.7rem; color:var(--text-secondary)">Desirable: &lt; 500 PPM</span>
+            </div>
+            <div style="height:120px"><canvas id="chart-tds"></canvas></div>
+          </div>
+
+          <div class="chart-box">
+            <div class="chart-box-header">
+              <h4>Temperature Dynamics (°C)</h4>
+              <span style="font-size:0.7rem; color:var(--text-secondary)">DS18B20 Digital Sensor</span>
+            </div>
+            <div style="height:120px"><canvas id="chart-temperature"></canvas></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Multi-Sensor Anomaly Analysis (Replaces AI Classification Breakdown) -->
+      <div class="glass-panel source-box">
+        <h3 style="font-family:var(--font-display); font-size:1.125rem; font-weight:600">📊 Multi-Sensor Anomaly
+          Analysis</h3>
+        <div style="height: 180px"><canvas id="chart-sources"></canvas></div>
+
+        <div class="source-metrics-grid">
+          <div class="source-metric-card">
+            <div class="source-count text-good" id="cnt-normal">0</div>
+            <div class="source-label">Normal</div>
+          </div>
+          <div class="source-metric-card">
+            <div class="source-count text-warning" id="cnt-industrial">0</div>
+            <div class="source-label">Single Breach</div>
+          </div>
+          <div class="source-metric-card">
+            <div class="source-count text-critical" id="cnt-sewage">0</div>
+            <div class="source-label">Multi-Anomaly</div>
+          </div>
+          <div class="source-metric-card">
+            <div class="source-count" style="color:var(--color-purple)" id="cnt-oilspill">0</div>
+            <div class="source-label">Sensor Check</div>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- 6. Explainable Sensor Analysis (Replaces AI Assessment) -->
+    <section class="glass-panel ai-insight-panel">
+      <div class="ai-icon-large">🔍</div>
+      <div class="ai-content">
+        <h3 id="ai-insight-title">Explainable Sensor Analysis: Evaluating Telemetry Streams...</h3>
+        <p id="ai-insight-desc">Parameters are cross-referenced with calibrated thresholds and multi-sensor correlation
+          rules to explain abnormal patterns.</p>
+        <div class="ai-recommendation" id="ai-insight-rec">
+          👉 <strong>Recommended Verification Action:</strong> Processing incoming multi-sensor frame...
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Intelligent Early Warning System (Upgraded Triggered Alerts) -->
+    <section class="glass-panel events-table-panel"
+      style="grid-column: span 4; display:flex; flex-direction:column; gap:1rem">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <h3 style="font-family:var(--font-display); font-size:1.125rem; font-weight:600">🚨 Intelligent Early Warning
+          System</h3>
+        <span style="font-size:0.7rem; color:var(--text-secondary)">Low / Med / High Severity</span>
+      </div>
+      <div class="alerts-list" id="alerts-list">
+        <div class="placeholder-alert" style="text-align:center; padding:1.5rem; color:var(--text-muted)">
+          No active threshold alerts.
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Water Quality Measurement History (Renamed from Hazardous Incidents Log) -->
+    <section class="glass-panel events-table-panel" style="grid-column: span 8">
+      <div class="events-table-header">
+        <h3>📋 Water Quality Measurement History</h3>
+        <span style="font-size:0.75rem; color:var(--text-secondary)">All stored sensor readings & verified anomaly
+          states</span>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="events-table">
+          <thead>
+            <tr>
+              <th>Mode / Source</th>
+              <th>Timestamp</th>
+              <th>pH Level</th>
+              <th>Turbidity (NTU)</th>
+              <th>TDS (PPM)</th>
+              <th>Temp (°C)</th>
+              <th>Status / Anomaly Reason</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="events-table-body">
+            <!-- Dynamic rows populated from Javascript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 9. About Panel (Updated with actual AquaTrace project description) -->
+    <footer class="glass-panel project-about-panel">
+      <h3>About AquaTrace Project</h3>
+      <p>AquaTrace is a coastal water quality monitoring platform engineered using an <strong>Arduino Uno
+          microcontroller</strong> paired with four core sensors: <strong>pH Sensor</strong>, <strong>TDS (Total
+          Dissolved Solids) Sensor</strong>, <strong>Turbidity Sensor</strong>, and a <strong>DS18B20 Waterproof
+          Temperature Sensor</strong>, alongside an <strong>I2C 20×4 LCD Character Display</strong>. The system
+        implements multi-sensor data fusion, deterministic anomaly detection, sensor health monitoring, and short-term
+        predictive analysis for transparent environmental protection.</p>
+    </footer>
+
+  </div>
+
+  <!-- Detailed Modal for Device & Sensor Diagnostic Drill-Down -->
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h2>📊 Sensor Diagnostic & Predictive Drilldown: <span id="modal-device-id">AquaTrace Node</span></h2>
+        <button class="modal-close-btn">&times;</button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- Grid specs -->
+        <div class="detail-grid">
+          <div class="detail-card">
+            <div class="detail-card-label">Overall Sensor Health</div>
+            <div class="detail-card-value" id="det-status">-</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Multi-Sensor Assessment</div>
+            <div class="detail-card-value" id="det-pollution-index">-</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-card-label">Detected Anomaly Pattern</div>
+            <div class="detail-card-value" id="det-source">-</div>
+          </div>
+        </div>
+
+        <div class="detail-grid" style="grid-template-columns: 1fr 1fr; margin-top:-0.5rem">
+          <div class="detail-card" style="padding:0.5rem">
+            <span style="font-size:0.75rem; color:var(--text-secondary)">Hardware Link:</span>
+            <strong id="det-battery" style="margin-left:0.25rem">-</strong>
+          </div>
+          <div class="detail-card" style="padding:0.5rem">
+            <span style="font-size:0.75rem; color:var(--text-secondary)">Model Prediction Confidence:</span>
+            <strong id="det-signal" style="margin-left:0.25rem">-</strong>
+          </div>
+        </div>
+
+        <!-- Predictive Line Chart (Actual vs Predicted) -->
+        <div>
+          <h4 style="margin-bottom:0.5rem; font-family:var(--font-display)">🔮 Predictive Analysis & Historical Trend
+            Comparison</h4>
+          <div style="height: 250px; background: rgba(0, 0, 0, 0.1); padding:0.5rem; border-radius:10px">
+            <canvas id="chart-detail"></canvas>
+          </div>
+        </div>
+
+        <!-- Arduino Serial Monitor Log Simulation -->
+        <div>
+          <h4 style="margin-bottom:0.5rem; font-family:var(--font-display)">📟 Arduino Serial Communication Log</h4>
+          <div class="serial-monitor" id="serial-monitor-log">
+            <!-- Dynamically populated logs -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard core application JS logic -->
+  <script src="app.js"></script>
+</body>
+
+</html>
